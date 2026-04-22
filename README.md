@@ -118,17 +118,9 @@ npx skills add gked2121/videohub-hq
 
 ## Screenshots
 
-### App UI
-
 | Create Tab + Advanced Options | Generating with Progress Bar |
 |---|---|
 | ![Create](screenshots/app-create-tab.png) | ![Generating](screenshots/app-generating.png) |
-
-### Generated Video Output
-
-| Star Wars Crawl Scene | Final Card |
-|---|---|
-| ![Crawl](screenshots/video-crawl.png) | ![Final Card](screenshots/video-final-card.png) |
 
 ## Tech Stack
 
