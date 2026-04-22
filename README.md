@@ -4,6 +4,8 @@ A native macOS app for creating AI-powered videos with [Claude Code](https://cla
 
 Type a prompt, hit Generate, and Claude Code builds a full HyperFrames video composition -- scenes, GSAP animations, transitions, typography, and all.
 
+Made by [onewave-ai.com](https://onewave-ai.com)
+
 ![macOS](https://img.shields.io/badge/macOS-13%2B-black?style=flat-square)
 ![Swift](https://img.shields.io/badge/Swift-SwiftUI-orange?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)

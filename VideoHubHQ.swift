@@ -411,7 +411,7 @@ struct ContentView: View {
                             .font(.system(size: 24, weight: .bold, design: .rounded))
                             .foregroundColor(.warmWhite)
                     }
-                    Text("AI Video Studio")
+                    Text("AI Video Studio by onewave-ai.com")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.dimText)
                         .tracking(1.5)
