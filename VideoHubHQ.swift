@@ -105,12 +105,43 @@ class ClaudeRunner: ObservableObject {
     @Published var state: GenerationState = .idle
     @Published var logLines: [String] = []
     @Published var thumbnailPath: String? = nil
+    @Published var progress: Double = 0 // 0.0 to 1.0
+    @Published var statusText: String = ""
     private var process: Process?
+
+    private func updateProgress(from line: String) {
+        let lower = line.lowercased()
+        if lower.contains("starting") || lower.contains("initializ") {
+            progress = 0.05; statusText = "Initializing project..."
+        } else if lower.contains("hyperframes init") || lower.contains("scaffolding") || lower.contains("npx hyperframes") {
+            progress = max(progress, 0.12); statusText = "Scaffolding project..."
+        } else if lower.contains("creating") || lower.contains("writing") || lower.contains("wrote") {
+            progress = max(progress, 0.20); statusText = "Writing files..."
+        } else if lower.contains("composition") || lower.contains(".html") {
+            progress = max(progress, 0.35); statusText = "Building compositions..."
+        } else if lower.contains("gsap") || lower.contains("animation") || lower.contains("transition") {
+            progress = max(progress, 0.50); statusText = "Adding animations..."
+        } else if lower.contains("style") || lower.contains("css") || lower.contains("palette") || lower.contains("color") {
+            progress = max(progress, 0.60); statusText = "Styling..."
+        } else if lower.contains("font") || lower.contains("typography") {
+            progress = max(progress, 0.65); statusText = "Setting typography..."
+        } else if lower.contains("lint") || lower.contains("validat") {
+            progress = max(progress, 0.80); statusText = "Validating..."
+        } else if lower.contains("complete") || lower.contains("done") || lower.contains("success") {
+            progress = 0.95; statusText = "Finishing up..."
+        }
+        // Slow crawl for lines that don't match known milestones
+        if progress > 0.05 && progress < 0.80 {
+            progress = min(progress + 0.008, 0.79)
+        }
+    }
 
     func generate(prompt: String, outputDir: String, completion: @escaping (String?) -> Void) {
         state = .generating
         logLines = ["Starting Claude Code..."]
         thumbnailPath = nil
+        progress = 0.02
+        statusText = "Starting Claude Code..."
 
         let projectName = slugify(prompt)
         let projectPath = (outputDir as NSString).appendingPathComponent(projectName)
@@ -171,6 +202,7 @@ class ClaudeRunner: ObservableObject {
             let lines = str.components(separatedBy: .newlines).filter { !$0.isEmpty }
             DispatchQueue.main.async {
                 self?.logLines.append(contentsOf: lines)
+                for line in lines { self?.updateProgress(from: line) }
                 // Keep last 200 lines
                 if let count = self?.logLines.count, count > 200 {
                     self?.logLines = Array(self!.logLines.suffix(200))
@@ -194,6 +226,8 @@ class ClaudeRunner: ObservableObject {
 
                 if process.terminationStatus == 0 {
                     self?.state = .snapshotting
+                    self?.progress = 0.90
+                    self?.statusText = "Capturing thumbnails..."
                     self?.logLines.append("Generation complete! Capturing thumbnails...")
                     self?.runSnapshot(projectPath: projectPath, env: env) {
                         self?.state = .success(path: projectPath)
@@ -329,9 +363,31 @@ struct ContentView: View {
     @State private var selectedTab = 0 // 0 = create, 1 = recent
     @State private var showOnboarding: Bool = !UserDefaults.standard.bool(forKey: "VideoHubHQ_SeenOnboarding")
     @State private var onboardingOpacity: Double = 0
+    @State private var showAdvanced = false
+    @State private var videoLength = "30 seconds"
+    @State private var videoGoal = "Marketing"
+    @State private var videoStyle = "Dark Premium"
+    @State private var advancedColorScheme = "Sand & Terra Cotta"
+    @State private var animationSpeed = "Medium"
     @FocusState private var promptFocused: Bool
 
+    private let lengthOptions = ["15 seconds", "30 seconds", "45 seconds", "60 seconds", "90 seconds"]
+    private let goalOptions = ["Marketing", "Product Demo", "Social Media", "Explainer", "Announcement", "Tutorial", "Testimonial"]
+    private let styleOptions = ["Dark Premium", "Clean Corporate", "Bold Energetic", "Warm Editorial", "Nature Earth", "Monochrome"]
+    private let colorOptions = ["Sand & Terra Cotta", "Auto (from prompt)", "Warm Neutrals", "Cool Steel", "Forest & Gold", "Coral & Cream"]
+    private let speedOptions = ["Slow", "Medium", "Fast", "Dynamic"]
+
     private var isGenerating: Bool { runner.state == .generating }
+
+    private var advancedOptionsCount: Int {
+        var count = 0
+        if videoLength != "30 seconds" { count += 1 }
+        if videoGoal != "Marketing" { count += 1 }
+        if videoStyle != "Dark Premium" { count += 1 }
+        if advancedColorScheme != "Sand & Terra Cotta" { count += 1 }
+        if animationSpeed != "Medium" { count += 1 }
+        return count
+    }
 
     var body: some View {
         ZStack {
@@ -422,7 +478,7 @@ struct ContentView: View {
                 .ignoresSafeArea()
                 .onTapGesture { dismissOnboarding() }
 
-            VStack(spacing: 24) {
+            VStack(spacing: 20) {
                 // Title
                 VStack(spacing: 8) {
                     Image(systemName: "play.rectangle.fill")
@@ -431,70 +487,68 @@ struct ContentView: View {
                     Text("Welcome to VideoHub HQ")
                         .font(.system(size: 20, weight: .bold, design: .rounded))
                         .foregroundColor(.warmWhite)
-                    Text("Two ways to make videos")
+                    Text("AI-powered video creation studio")
                         .font(.system(size: 13))
                         .foregroundColor(.dimText)
                 }
 
-                // Option cards
-                VStack(spacing: 12) {
-                    // Create option
-                    HStack(spacing: 14) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(
-                                    LinearGradient(colors: [.sand.opacity(0.2), .terra.opacity(0.15)],
-                                                   startPoint: .topLeading, endPoint: .bottomTrailing)
-                                )
-                                .frame(width: 44, height: 44)
-                            Image(systemName: "wand.and.stars")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundColor(.sand)
-                        }
+                // Feature cards
+                VStack(spacing: 8) {
+                    // Prompt-to-video
+                    featureRow(
+                        icon: "wand.and.stars",
+                        iconGradient: true,
+                        title: "Prompt to Video",
+                        desc: "Describe your video and Claude Code builds a full HyperFrames project with scenes, GSAP animations, and transitions."
+                    )
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Create")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundColor(.warmWhite)
-                            Text("Type a prompt and Claude Code builds the entire HyperFrames video project for you. AI-powered, start to finish.")
-                                .font(.system(size: 12))
-                                .foregroundColor(.dimText)
-                                .lineLimit(3)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(14)
-                    .background(Color.cardBg)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.sand.opacity(0.25), lineWidth: 1))
+                    // Advanced options
+                    featureRow(
+                        icon: "slider.horizontal.3",
+                        iconGradient: false,
+                        title: "Advanced Options",
+                        desc: "Fine-tune duration, style, color palette, animation speed, and video goal for precise creative control."
+                    )
 
-                    // Projects option
-                    HStack(spacing: 14) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color.cardHover)
-                                .frame(width: 44, height: 44)
-                            Image(systemName: "film.stack")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundColor(.sand)
-                        }
+                    // Live progress
+                    featureRow(
+                        icon: "chart.bar.fill",
+                        iconGradient: false,
+                        title: "Live Progress",
+                        desc: "Watch real-time progress with a visual progress bar and streaming agent output as your video is built."
+                    )
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Projects")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundColor(.warmWhite)
-                            Text("Open and preview existing HyperFrames projects. Your recent projects are saved here for quick access.")
-                                .font(.system(size: 12))
-                                .foregroundColor(.dimText)
-                                .lineLimit(3)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(14)
-                    .background(Color.cardBg)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.borderColor, lineWidth: 0.5))
+                    // Auto-thumbnails & preview
+                    featureRow(
+                        icon: "photo.on.rectangle.angled",
+                        iconGradient: false,
+                        title: "Thumbnails & Preview",
+                        desc: "Auto-captures key frame thumbnails after generation. Preview in HyperFrames Studio with a dark-themed viewer."
+                    )
                 }
+
+                // CLI skill tip
+                HStack(spacing: 10) {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.terra)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Also works from the CLI")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.warmWhite)
+                        Text("Install the VideoHub skill for Claude Code:")
+                            .font(.system(size: 10))
+                            .foregroundColor(.dimText)
+                        Text("npx skills add gked2121/videohub-hq")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(.sand)
+                    }
+                    Spacer()
+                }
+                .padding(10)
+                .background(Color.terra.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.terra.opacity(0.2), lineWidth: 0.5))
 
                 // Dismiss button
                 Button(action: dismissOnboarding) {
@@ -511,7 +565,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
             }
             .padding(28)
-            .frame(width: 400)
+            .frame(width: 420)
             .background(Color.bg)
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.borderColor, lineWidth: 1))
@@ -530,6 +584,37 @@ struct ContentView: View {
             UserDefaults.standard.set(true, forKey: "VideoHubHQ_SeenOnboarding")
             promptFocused = true
         }
+    }
+
+    private func featureRow(icon: String, iconGradient: Bool, title: String, desc: String) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(iconGradient
+                        ? AnyShapeStyle(LinearGradient(colors: [.sand.opacity(0.2), .terra.opacity(0.15)],
+                                                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                        : AnyShapeStyle(Color.cardHover))
+                    .frame(width: 36, height: 36)
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.sand)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.warmWhite)
+                Text(desc)
+                    .font(.system(size: 11))
+                    .foregroundColor(.dimText)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.cardBg)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.borderColor, lineWidth: 0.5))
     }
 
     // MARK: - Create Tab
@@ -572,100 +657,291 @@ struct ContentView: View {
             .offset(y: appeared ? 0 : 8)
             .animation(.easeOut(duration: 0.4).delay(0.1), value: appeared)
 
-            // Generate / Cancel button
-            HStack(spacing: 10) {
-                if isGenerating {
-                    Button(action: { runner.cancel() }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 12, weight: .bold))
-                            Text("Cancel")
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-                        .foregroundColor(.warmWhite)
-                        .frame(width: 100, height: 40)
-                        .background(Color.cardBg)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.borderColor, lineWidth: 0.5))
+            // Advanced Options
+            VStack(alignment: .leading, spacing: 0) {
+                // Toggle button
+                Button(action: {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        showAdvanced.toggle()
                     }
-                    .buttonStyle(.plain)
-                }
-
-                Button(action: startGeneration) {
-                    HStack(spacing: 8) {
-                        if isGenerating {
-                            PulsingDots(color: .warmWhite)
-                                .frame(width: 24, height: 16)
-                            Text("Generating...")
-                                .font(.system(size: 14, weight: .semibold))
-                        } else {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 14, weight: .medium))
-                            Text("Generate Video")
-                                .font(.system(size: 14, weight: .semibold))
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.dimText)
+                            .rotationEffect(.degrees(showAdvanced ? 90 : 0))
+                            .animation(.easeOut(duration: 0.2), value: showAdvanced)
+                        Text("Advanced Options")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.dimText)
+                        if advancedOptionsCount > 0 {
+                            Text("\(advancedOptionsCount)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.warmWhite)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.terra.opacity(0.5))
+                                .clipShape(Capsule())
                         }
+                        Spacer()
                     }
-                    .foregroundColor(isGenerating ? .warmWhite : .bg)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .background(
-                        isGenerating
-                        ? AnyShapeStyle(Color.cardBg)
-                        : AnyShapeStyle(LinearGradient(colors: [.sand, .terra], startPoint: .leading, endPoint: .trailing))
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        isGenerating
-                        ? AnyShapeStyle(Color.borderColor)
-                        : AnyShapeStyle(Color.clear),
-                        in: RoundedRectangle(cornerRadius: 10).stroke(lineWidth: 0.5)
-                    )
                 }
                 .buttonStyle(.plain)
-                .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isGenerating)
 
-                // Hidden button for Cmd+Enter shortcut
-                Button("") { startGeneration() }
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .frame(width: 0, height: 0)
-                    .opacity(0)
+                if showAdvanced {
+                    // Options grid
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12)
+                    ], alignment: .leading, spacing: 12) {
+                        // Duration
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("DURATION")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.dimText)
+                                .tracking(1.2)
+                            Menu {
+                                ForEach(lengthOptions, id: \.self) { opt in
+                                    Button(opt) { videoLength = opt }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(videoLength)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.warmWhite)
+                                    Spacer()
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.dimText)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(Color.inputBg)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.borderColor, lineWidth: 0.5))
+                            }
+                        }
+
+                        // Goal
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("GOAL")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.dimText)
+                                .tracking(1.2)
+                            Menu {
+                                ForEach(goalOptions, id: \.self) { opt in
+                                    Button(opt) { videoGoal = opt }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(videoGoal)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.warmWhite)
+                                    Spacer()
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.dimText)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(Color.inputBg)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.borderColor, lineWidth: 0.5))
+                            }
+                        }
+
+                        // Style
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("STYLE")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.dimText)
+                                .tracking(1.2)
+                            Menu {
+                                ForEach(styleOptions, id: \.self) { opt in
+                                    Button(opt) { videoStyle = opt }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(videoStyle)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.warmWhite)
+                                    Spacer()
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.dimText)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(Color.inputBg)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.borderColor, lineWidth: 0.5))
+                            }
+                        }
+
+                        // Colors
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("COLORS")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.dimText)
+                                .tracking(1.2)
+                            Menu {
+                                ForEach(colorOptions, id: \.self) { opt in
+                                    Button(opt) { advancedColorScheme = opt }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(advancedColorScheme)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.warmWhite)
+                                    Spacer()
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.dimText)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(Color.inputBg)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.borderColor, lineWidth: 0.5))
+                            }
+                        }
+
+                        // Speed
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("SPEED")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.dimText)
+                                .tracking(1.2)
+                            Menu {
+                                ForEach(speedOptions, id: \.self) { opt in
+                                    Button(opt) { animationSpeed = opt }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(animationSpeed)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.warmWhite)
+                                    Spacer()
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.dimText)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(Color.inputBg)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.borderColor, lineWidth: 0.5))
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .background(Color.cardBg)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.borderColor, lineWidth: 0.5))
+                    .padding(.top, 8)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
             .padding(.horizontal, 28)
+            .disabled(isGenerating)
+
+            // Generate button (hidden during generation)
+            Group {
+                if !isGenerating && runner.state != .snapshotting {
+                    VStack(spacing: 4) {
+                        Button(action: startGeneration) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 14, weight: .medium))
+                                Text("Generate Video")
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .foregroundColor(.bg)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .background(
+                                LinearGradient(colors: [.sand, .terra], startPoint: .leading, endPoint: .trailing)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        // Hidden button for Cmd+Enter shortcut
+                        Button("") { startGeneration() }
+                            .keyboardShortcut(.return, modifiers: .command)
+                            .frame(width: 0, height: 0)
+                            .opacity(0)
+
+                        HStack {
+                            Spacer()
+                            Text("Cmd+Return to generate")
+                                .font(.system(size: 10))
+                                .foregroundColor(.dimText.opacity(0.5))
+                        }
+                    }
+                    .padding(.horizontal, 28)
+                }
+            }
             .opacity(appeared ? 1 : 0)
             .offset(y: appeared ? 0 : 8)
             .animation(.easeOut(duration: 0.4).delay(0.15), value: appeared)
 
-            HStack {
-                Spacer()
-                Text("Cmd+Return to generate")
-                    .font(.system(size: 10))
-                    .foregroundColor(.dimText.opacity(0.5))
-            }
-            .padding(.horizontal, 28)
+            // Progress bar + terminal (visible during generation)
+            if isGenerating || runner.state == .snapshotting {
+                VStack(spacing: 10) {
+                    // Progress bar
+                    VStack(spacing: 6) {
+                        HStack {
+                            Text(runner.statusText)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.warmWhite)
+                            Spacer()
+                            Text("\(Int(runner.progress * 100))%")
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundColor(.sand)
 
-            // Status / result
-            statusView
-                .padding(.horizontal, 28)
+                            Button(action: { runner.cancel() }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.dimText)
+                            }
+                            .buttonStyle(.plain)
+                        }
 
-            // Log output
-            if !runner.logLines.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Button(action: { withAnimation(.easeOut(duration: 0.2)) { showLog.toggle() } }) {
+                        // Bar track
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.inputBg)
+                                    .frame(height: 6)
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(
+                                        LinearGradient(colors: [.sand, .terra], startPoint: .leading, endPoint: .trailing)
+                                    )
+                                    .frame(width: max(0, geo.size.width * runner.progress), height: 6)
+                                    .animation(.easeOut(duration: 0.3), value: runner.progress)
+                            }
+                        }
+                        .frame(height: 6)
+                    }
+                    .padding(.horizontal, 28)
+
+                    // Terminal output (always visible during generation)
+                    VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
-                            Image(systemName: showLog ? "chevron.down" : "chevron.right")
+                            Circle().fill(Color.terra).frame(width: 6, height: 6)
+                            Text("AGENT OUTPUT")
                                 .font(.system(size: 9, weight: .bold))
-                            Text("OUTPUT")
-                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.dimText)
                                 .tracking(1.2)
                             Spacer()
                             Text("\(runner.logLines.count) lines")
-                                .font(.system(size: 10))
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.dimText.opacity(0.6))
                         }
-                        .foregroundColor(.dimText)
-                    }
-                    .buttonStyle(.plain)
+                        .padding(.horizontal, 4)
 
-                    if showLog {
                         ScrollViewReader { proxy in
                             ScrollView {
                                 LazyVStack(alignment: .leading, spacing: 1) {
@@ -674,16 +950,19 @@ struct ContentView: View {
                                             .font(.system(size: 11, design: .monospaced))
                                             .foregroundColor(
                                                 line.contains("ERROR") ? .errorRed :
-                                                line.contains("complete") ? .successGreen :
+                                                line.contains("complete") || line.contains("success") ? .successGreen :
+                                                line.contains("[snapshot]") ? .sand :
+                                                line.hasPrefix("[stderr]") ? .dimText.opacity(0.6) :
                                                 .dimText
                                             )
+                                            .textSelection(.enabled)
                                             .id(i)
                                     }
                                 }
                                 .padding(10)
                             }
-                            .frame(maxHeight: 150)
-                            .background(Color.inputBg)
+                            .frame(maxHeight: 180)
+                            .background(Color(red: 0.06, green: 0.06, blue: 0.05))
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor, lineWidth: 0.5))
                             .onChange(of: runner.logLines.count) { _ in
@@ -693,9 +972,66 @@ struct ContentView: View {
                             }
                         }
                     }
+                    .padding(.horizontal, 28)
                 }
-                .padding(.horizontal, 28)
-                .transition(.opacity)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Status / result (when not generating)
+            if !isGenerating && runner.state != .snapshotting {
+                statusView
+                    .padding(.horizontal, 28)
+
+                // Collapsed log for reviewing after completion
+                if !runner.logLines.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Button(action: { withAnimation(.easeOut(duration: 0.2)) { showLog.toggle() } }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: showLog ? "chevron.down" : "chevron.right")
+                                    .font(.system(size: 9, weight: .bold))
+                                Text("OUTPUT")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .tracking(1.2)
+                                Spacer()
+                                Text("\(runner.logLines.count) lines")
+                                    .font(.system(size: 10))
+                            }
+                            .foregroundColor(.dimText)
+                        }
+                        .buttonStyle(.plain)
+
+                        if showLog {
+                            ScrollViewReader { proxy in
+                                ScrollView {
+                                    LazyVStack(alignment: .leading, spacing: 1) {
+                                        ForEach(Array(runner.logLines.enumerated()), id: \.offset) { i, line in
+                                            Text(line)
+                                                .font(.system(size: 11, design: .monospaced))
+                                                .foregroundColor(
+                                                    line.contains("ERROR") ? .errorRed :
+                                                    line.contains("complete") ? .successGreen :
+                                                    .dimText
+                                                )
+                                                .id(i)
+                                        }
+                                    }
+                                    .padding(10)
+                                }
+                                .frame(maxHeight: 150)
+                                .background(Color.inputBg)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor, lineWidth: 0.5))
+                                .onChange(of: runner.logLines.count) { _ in
+                                    withAnimation {
+                                        proxy.scrollTo(runner.logLines.count - 1, anchor: .bottom)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 28)
+                    .transition(.opacity)
+                }
             }
         }
     }
@@ -721,52 +1057,77 @@ struct ContentView: View {
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.sand.opacity(0.15), lineWidth: 0.5))
             .transition(.opacity)
         case .success(let path):
-            HStack(spacing: 10) {
+            VStack(spacing: 10) {
+                // Thumbnail row (if captured)
                 if let thumbPath = runner.thumbnailPath,
                    let nsImage = NSImage(contentsOfFile: thumbPath) {
                     Image(nsImage: nsImage)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 60, height: 34)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.borderColor.opacity(0.4), lineWidth: 0.5))
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxHeight: 120)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor.opacity(0.4), lineWidth: 0.5))
                 }
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.successGreen)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Video project created")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.warmWhite)
-                    Text((path as NSString).lastPathComponent)
-                        .font(.system(size: 11))
-                        .foregroundColor(.dimText)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Button(action: { launchPreview(path: path) }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 10))
-                        Text("Preview")
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                    .foregroundColor(.bg)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color.sand)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
 
-                Button(action: { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path) }) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 12))
-                        .foregroundColor(.dimText)
-                        .frame(width: 30, height: 30)
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.successGreen)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Video project created")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.warmWhite)
+                        Text((path as NSString).lastPathComponent)
+                            .font(.system(size: 11))
+                            .foregroundColor(.dimText)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                }
+
+                // Action buttons
+                HStack(spacing: 6) {
+                    Button(action: { launchPreview(path: path) }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 10))
+                            Text("Preview")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(.bg)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color.sand)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { captureThumnails(path: path) }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 10))
+                            Text("Thumbnails")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(.warmWhite)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
                         .background(Color.cardBg)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor, lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path) }) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 12))
+                            .foregroundColor(.dimText)
+                            .frame(width: 34, height: 34)
+                            .background(Color.cardBg)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor, lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .padding(12)
             .background(Color.successGreen.opacity(0.08))
@@ -925,7 +1286,18 @@ struct ContentView: View {
         let outputDir = (NSHomeDirectory() as NSString).appendingPathComponent("Desktop/videohub-projects")
         try? FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
 
-        runner.generate(prompt: trimmed, outputDir: outputDir) { path in
+        var fullPrompt = trimmed
+        if showAdvanced {
+            fullPrompt += "\n\nVideo specifications:"
+            fullPrompt += "\n- Duration: \(videoLength)"
+            fullPrompt += "\n- Goal: \(videoGoal)"
+            fullPrompt += "\n- Visual style: \(videoStyle)"
+            if advancedColorScheme != "Auto (from prompt)" {
+                fullPrompt += "\n- Color palette: \(advancedColorScheme)"
+            }
+            fullPrompt += "\n- Animation speed: \(animationSpeed)"
+        }
+        runner.generate(prompt: fullPrompt, outputDir: outputDir) { path in
             if let path = path {
                 store.add(path: path, prompt: trimmed)
             }
@@ -943,6 +1315,47 @@ struct ContentView: View {
         if panel.runModal() == .OK, let url = panel.url {
             store.add(path: url.path, prompt: "")
             launchPreview(path: url.path)
+        }
+    }
+
+    private func captureThumnails(path: String) {
+        runner.logLines.append("Capturing thumbnails...")
+        runner.thumbnailPath = nil
+
+        DispatchQueue.global().async {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            proc.arguments = ["-c", "cd '\(path)' && npx hyperframes snapshot"]
+            var env = ProcessInfo.processInfo.environment
+            let extraPaths = ["/opt/homebrew/bin", "\(NSHomeDirectory())/.local/bin", "/usr/local/bin", "/usr/bin"]
+            env["PATH"] = (extraPaths + [env["PATH"] ?? ""]).joined(separator: ":")
+            proc.environment = env
+
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = pipe
+
+            try? proc.run()
+            proc.waitUntilExit()
+
+            // Find first snapshot PNG
+            let snapshotsDir = (path as NSString).appendingPathComponent("snapshots")
+            if let files = try? FileManager.default.contentsOfDirectory(atPath: snapshotsDir) {
+                let pngs = files.filter { $0.hasSuffix(".png") }.sorted()
+                if let first = pngs.first {
+                    let thumbPath = (snapshotsDir as NSString).appendingPathComponent(first)
+                    DispatchQueue.main.async {
+                        self.runner.thumbnailPath = thumbPath
+                        self.runner.logLines.append("Captured \(pngs.count) thumbnails")
+                        // Regenerate preview page with thumbnails
+                        self.generatePreviewPage(projectPath: path)
+                    }
+                    return
+                }
+            }
+            DispatchQueue.main.async {
+                self.runner.logLines.append("No thumbnails captured - check if project has compositions")
+            }
         }
     }
 
@@ -1178,13 +1591,40 @@ struct ContentView: View {
                     fetch(studioUrl, { mode: 'no-cors' })
                         .then(() => {
                             iframe.src = studioUrl;
-                            iframe.onload = () => loader.classList.add('hidden');
+                            iframe.onload = () => {
+                                loader.classList.add('hidden');
+                                // Auto-play: wait for the Studio's player to initialize, then send play
+                                setTimeout(() => autoPlay(), 2000);
+                            };
                         })
                         .catch(() => {
                             attempts++;
                             if (attempts < 30) setTimeout(tryConnect, 1000);
                             else loader.innerHTML = '<div style="color:#8C8A82;font-size:13px;">Studio not responding. <a href="' + studioUrl + '" target="_blank" style="color:#D9BF94;">Open directly</a></div>';
                         });
+                }
+                function autoPlay() {
+                    try {
+                        // Find the hyperframes-player inside the Studio and click play
+                        const studioDoc = iframe.contentDocument || iframe.contentWindow.document;
+                        const player = studioDoc.querySelector('hyperframes-player');
+                        if (player && player.iframeElement) {
+                            // Send play command via postMessage to the composition runtime
+                            player.iframeElement.contentWindow.postMessage(
+                                { source: 'hf-parent', type: 'control', action: 'play' }, '*'
+                            );
+                        } else {
+                            // Fallback: broadcast play to all nested iframes
+                            iframe.contentWindow.postMessage(
+                                { source: 'hf-parent', type: 'control', action: 'play' }, '*'
+                            );
+                        }
+                    } catch(e) {
+                        // Cross-origin fallback: just postMessage into the studio iframe
+                        iframe.contentWindow.postMessage(
+                            { source: 'hf-parent', type: 'control', action: 'play' }, '*'
+                        );
+                    }
                 }
                 tryConnect();
             </script>
