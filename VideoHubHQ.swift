@@ -52,6 +52,7 @@ extension Color {
 enum GenerationState: Equatable {
     case idle
     case generating
+    case snapshotting
     case success(path: String)
     case error(message: String)
 }
@@ -103,11 +104,13 @@ class RecentProjectsStore: ObservableObject {
 class ClaudeRunner: ObservableObject {
     @Published var state: GenerationState = .idle
     @Published var logLines: [String] = []
+    @Published var thumbnailPath: String? = nil
     private var process: Process?
 
     func generate(prompt: String, outputDir: String, completion: @escaping (String?) -> Void) {
         state = .generating
         logLines = ["Starting Claude Code..."]
+        thumbnailPath = nil
 
         let projectName = slugify(prompt)
         let projectPath = (outputDir as NSString).appendingPathComponent(projectName)
@@ -190,9 +193,12 @@ class ClaudeRunner: ObservableObject {
                 errPipe.fileHandleForReading.readabilityHandler = nil
 
                 if process.terminationStatus == 0 {
-                    self?.state = .success(path: projectPath)
-                    self?.logLines.append("Generation complete!")
-                    completion(projectPath)
+                    self?.state = .snapshotting
+                    self?.logLines.append("Generation complete! Capturing thumbnails...")
+                    self?.runSnapshot(projectPath: projectPath, env: env) {
+                        self?.state = .success(path: projectPath)
+                        completion(projectPath)
+                    }
                 } else {
                     self?.state = .error(message: "Claude exited with code \(process.terminationStatus)")
                     self?.logLines.append("ERROR: Process exited with code \(process.terminationStatus)")
@@ -209,6 +215,64 @@ class ClaudeRunner: ObservableObject {
             state = .error(message: "Failed to launch: \(error.localizedDescription)")
             logLines.append("ERROR: \(error.localizedDescription)")
             completion(nil)
+        }
+    }
+
+    private func runSnapshot(projectPath: String, env: [String: String], completion: @escaping () -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let snapProc = Process()
+            snapProc.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            snapProc.arguments = ["-c", "cd '\(projectPath)' && npx hyperframes snapshot"]
+            snapProc.environment = env
+
+            let snapPipe = Pipe()
+            let snapErrPipe = Pipe()
+            snapProc.standardOutput = snapPipe
+            snapProc.standardError = snapErrPipe
+
+            snapPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                let data = handle.availableData
+                guard !data.isEmpty, let str = String(data: data, encoding: .utf8) else { return }
+                let lines = str.components(separatedBy: .newlines).filter { !$0.isEmpty }
+                DispatchQueue.main.async {
+                    self?.logLines.append(contentsOf: lines.map { "[snapshot] \($0)" })
+                }
+            }
+
+            snapProc.terminationHandler = { [weak self] _ in
+                DispatchQueue.main.async {
+                    snapPipe.fileHandleForReading.readabilityHandler = nil
+                    snapErrPipe.fileHandleForReading.readabilityHandler = nil
+
+                    // Find first PNG in snapshots directory
+                    let snapshotsDir = (projectPath as NSString).appendingPathComponent("snapshots")
+                    if let files = try? FileManager.default.contentsOfDirectory(atPath: snapshotsDir) {
+                        let pngs = files.filter { $0.hasSuffix(".png") }.sorted()
+                        if let first = pngs.first {
+                            self?.thumbnailPath = (snapshotsDir as NSString).appendingPathComponent(first)
+                            self?.logLines.append("Thumbnail captured: \(first)")
+                        }
+                    }
+
+                    if self?.thumbnailPath == nil {
+                        self?.logLines.append("[snapshot] No thumbnails found")
+                    }
+
+                    completion()
+                }
+            }
+
+            do {
+                try snapProc.run()
+                DispatchQueue.main.async {
+                    self?.logLines.append("Running hyperframes snapshot...")
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.logLines.append("[snapshot] Failed to run: \(error.localizedDescription)")
+                    completion()
+                }
+            }
         }
     }
 
@@ -530,9 +594,8 @@ struct ContentView: View {
                 Button(action: startGeneration) {
                     HStack(spacing: 8) {
                         if isGenerating {
-                            ProgressView()
-                                .scaleEffect(0.6)
-                                .frame(width: 16, height: 16)
+                            PulsingDots(color: .warmWhite)
+                                .frame(width: 24, height: 16)
                             Text("Generating...")
                                 .font(.system(size: 14, weight: .semibold))
                         } else {
@@ -560,11 +623,25 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isGenerating)
+
+                // Hidden button for Cmd+Enter shortcut
+                Button("") { startGeneration() }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
             }
             .padding(.horizontal, 28)
             .opacity(appeared ? 1 : 0)
             .offset(y: appeared ? 0 : 8)
             .animation(.easeOut(duration: 0.4).delay(0.15), value: appeared)
+
+            HStack {
+                Spacer()
+                Text("Cmd+Return to generate")
+                    .font(.system(size: 10))
+                    .foregroundColor(.dimText.opacity(0.5))
+            }
+            .padding(.horizontal, 28)
 
             // Status / result
             statusView
@@ -630,8 +707,30 @@ struct ContentView: View {
             EmptyView()
         case .generating:
             EmptyView()
+        case .snapshotting:
+            HStack(spacing: 10) {
+                PulsingDots(color: .sand)
+                Text("Capturing thumbnails...")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.dimText)
+                Spacer()
+            }
+            .padding(12)
+            .background(Color.sand.opacity(0.06))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.sand.opacity(0.15), lineWidth: 0.5))
+            .transition(.opacity)
         case .success(let path):
             HStack(spacing: 10) {
+                if let thumbPath = runner.thumbnailPath,
+                   let nsImage = NSImage(contentsOfFile: thumbPath) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 60, height: 34)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.borderColor.opacity(0.4), lineWidth: 0.5))
+                }
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundColor(.successGreen)
                 VStack(alignment: .leading, spacing: 2) {
@@ -676,19 +775,76 @@ struct ContentView: View {
             .transition(.opacity.combined(with: .move(edge: .top)))
 
         case .error(let message):
-            HStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.errorRed)
-                Text(message)
-                    .font(.system(size: 12))
-                    .foregroundColor(.errorRed)
-                    .lineLimit(2)
-                Spacer()
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.errorRed)
+                    Text(message)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.errorRed)
+                        .lineLimit(3)
+                    Spacer()
+                }
+
+                HStack(spacing: 8) {
+                    Button(action: { startGeneration() }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Retry")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundColor(.bg)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.errorRed)
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(message, forType: .string)
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 10, weight: .medium))
+                            Text("Copy Error")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundColor(.warmWhite)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.cardBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.borderColor, lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { showLog = true }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "text.alignleft")
+                                .font(.system(size: 10, weight: .medium))
+                            Text("View Log")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundColor(.dimText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.cardBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.borderColor, lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+                }
             }
             .padding(12)
             .background(Color.errorRed.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 10))
-            .transition(.opacity)
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.errorRed.opacity(0.2), lineWidth: 0.5))
+            .transition(.opacity.combined(with: .move(edge: .top)))
         }
     }
 
@@ -791,6 +947,9 @@ struct ContentView: View {
     }
 
     private func launchPreview(path: String) {
+        // Generate a preview landing page with thumbnails
+        generatePreviewPage(projectPath: path)
+
         let script = "cd \(shellQuote(path)) && npx hyperframes preview"
         DispatchQueue.global().async {
             let appleScript = """
@@ -804,6 +963,174 @@ struct ContentView: View {
                 scriptObj.executeAndReturnError(&error)
             }
         }
+
+        // Open the landing page in the browser
+        let landingPath = (path as NSString).appendingPathComponent("_preview.html")
+        if FileManager.default.fileExists(atPath: landingPath) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                NSWorkspace.shared.open(URL(fileURLWithPath: landingPath))
+            }
+        }
+    }
+
+    private func generatePreviewPage(projectPath: String) {
+        let projectName = (projectPath as NSString).lastPathComponent
+        let snapshotsDir = (projectPath as NSString).appendingPathComponent("snapshots")
+
+        // Find all snapshot PNGs
+        var thumbnails: [String] = []
+        if let files = try? FileManager.default.contentsOfDirectory(atPath: snapshotsDir) {
+            thumbnails = files.filter { $0.hasSuffix(".png") }.sorted()
+        }
+
+        let thumbnailHTML: String
+        if thumbnails.isEmpty {
+            thumbnailHTML = """
+            <div style="text-align:center;padding:40px 0;color:#8C8A82;">
+                <p style="font-size:15px;">No thumbnails yet. Run generation first to capture frames.</p>
+            </div>
+            """
+        } else {
+            let imgs = thumbnails.map { name in
+                let relativePath = "snapshots/\(name)"
+                return """
+                <div style="flex:0 0 auto;border-radius:8px;overflow:hidden;border:1px solid #33312C;background:#1F1E1A;transition:transform 0.2s ease;">
+                    <img src="\(relativePath)" style="display:block;width:320px;height:auto;" alt="\(name)" />
+                    <div style="padding:6px 10px;font-size:11px;color:#8C8A82;font-family:-apple-system,sans-serif;">\(name)</div>
+                </div>
+                """
+            }.joined(separator: "\n")
+
+            thumbnailHTML = """
+            <div style="display:flex;gap:12px;overflow-x:auto;padding:4px 0 12px 0;">
+                \(imgs)
+            </div>
+            """
+        }
+
+        let html = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>\(projectName) -- VideoHub HQ</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                    background: #141412;
+                    color: #EDE8DE;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    min-height: 100vh;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                }
+                .container {
+                    max-width: 820px;
+                    width: 100%;
+                    padding: 48px 32px;
+                }
+                .header {
+                    display: flex;
+                    align-items: center;
+                    gap: 14px;
+                    margin-bottom: 32px;
+                }
+                .header-icon {
+                    width: 40px; height: 40px;
+                    background: linear-gradient(135deg, #D9BF94, #C7804E);
+                    border-radius: 10px;
+                    display: flex; align-items: center; justify-content: center;
+                }
+                .header-icon svg { width: 20px; height: 20px; fill: #141412; }
+                .header h1 {
+                    font-size: 22px; font-weight: 700; letter-spacing: -0.3px;
+                }
+                .header p {
+                    font-size: 12px; color: #8C8A82; text-transform: uppercase;
+                    letter-spacing: 1.5px; font-weight: 500;
+                }
+                .section-label {
+                    font-size: 10px; font-weight: 700; color: #8C8A82;
+                    text-transform: uppercase; letter-spacing: 1.5px;
+                    margin-bottom: 12px;
+                }
+                .card {
+                    background: #1F1E1A;
+                    border: 1px solid #33312C;
+                    border-radius: 12px;
+                    padding: 20px;
+                    margin-bottom: 24px;
+                }
+                .studio-btn {
+                    display: inline-flex; align-items: center; gap: 8px;
+                    background: linear-gradient(90deg, #D9BF94, #C7804E);
+                    color: #141412; font-weight: 600; font-size: 14px;
+                    padding: 12px 28px; border-radius: 10px; border: none;
+                    cursor: pointer; text-decoration: none;
+                    transition: opacity 0.2s ease;
+                }
+                .studio-btn:hover { opacity: 0.9; }
+                .studio-btn svg { width: 16px; height: 16px; fill: #141412; }
+                .folder-btn {
+                    display: inline-flex; align-items: center; gap: 6px;
+                    background: #1F1E1A; color: #8C8A82; font-size: 13px;
+                    padding: 10px 18px; border-radius: 8px;
+                    border: 1px solid #33312C; cursor: pointer; text-decoration: none;
+                    margin-left: 10px; transition: border-color 0.2s ease;
+                }
+                .folder-btn:hover { border-color: #D9BF94; color: #EDE8DE; }
+                .meta { font-size: 12px; color: #8C8A82; margin-top: 16px; }
+                .meta span { color: #D9BF94; }
+                .fade-in { animation: fadeIn 0.4s ease forwards; opacity: 0; }
+                @keyframes fadeIn { to { opacity: 1; } }
+                .fade-in:nth-child(2) { animation-delay: 0.05s; }
+                .fade-in:nth-child(3) { animation-delay: 0.1s; }
+                .fade-in:nth-child(4) { animation-delay: 0.15s; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header fade-in">
+                    <div class="header-icon">
+                        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    </div>
+                    <div>
+                        <h1>\(projectName)</h1>
+                        <p>VideoHub HQ</p>
+                    </div>
+                </div>
+
+                <div class="fade-in">
+                    <div class="section-label">Key Frames</div>
+                    <div class="card">
+                        \(thumbnailHTML)
+                    </div>
+                </div>
+
+                <div class="fade-in">
+                    <div class="section-label">Actions</div>
+                    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
+                        <a class="studio-btn" href="http://localhost:3002" target="_blank">
+                            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                            Open HyperFrames Studio
+                        </a>
+                        <span class="folder-btn" onclick="window.location='file://\(projectPath)'">
+                            Open Folder
+                        </span>
+                    </div>
+                    <div class="meta">
+                        Project path: <span>\(projectPath)</span>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        let outputPath = (projectPath as NSString).appendingPathComponent("_preview.html")
+        try? html.write(toFile: outputPath, atomically: true, encoding: .utf8)
     }
 
     private func shellQuote(_ s: String) -> String {
@@ -838,6 +1165,34 @@ struct TabButton: View {
             )
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Pulsing Dots Animation
+
+struct PulsingDots: View {
+    let color: Color
+    @State private var dotPulse = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(color)
+                    .frame(width: 6, height: 6)
+                    .scaleEffect(dotPulse ? 1.0 : 0.6)
+                    .opacity(dotPulse ? 1.0 : 0.4)
+                    .animation(
+                        Animation.easeInOut(duration: 0.5)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.15),
+                        value: dotPulse
+                    )
+            }
+        }
+        .onAppear {
+            dotPulse = true
+        }
     }
 }
 
