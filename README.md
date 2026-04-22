@@ -8,6 +8,10 @@ Type a prompt, hit Generate, and Claude Code builds a full HyperFrames video com
 ![Swift](https://img.shields.io/badge/Swift-SwiftUI-orange?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 
+| Create Tab + Advanced Options | Generating with Progress Bar |
+|---|---|
+| ![Create](screenshots/app-create-tab.png) | ![Generating](screenshots/app-generating.png) |
+
 ---
 
 ## Two Ways to Use VideoHub
@@ -115,12 +119,6 @@ Install it:
 ```bash
 npx skills add gked2121/videohub-hq
 ```
-
-## Screenshots
-
-| Create Tab + Advanced Options | Generating with Progress Bar |
-|---|---|
-| ![Create](screenshots/app-create-tab.png) | ![Generating](screenshots/app-generating.png) |
 
 ## Tech Stack
 
