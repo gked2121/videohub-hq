@@ -118,11 +118,14 @@ npx skills add gked2121/videohub-hq
 
 ## Screenshots
 
+### Generated Video Output
+
+| Star Wars Crawl Scene | Final Card |
+|---|---|
+| ![Crawl](screenshots/video-crawl.png) | ![Final Card](screenshots/video-final-card.png) |
+
 <!-- Add screenshot of Create tab with advanced options here -->
-<!-- Add screenshot of Progress bar + agent output here -->
 <!-- Add screenshot of Projects tab here -->
-<!-- Add screenshot of Onboarding overlay here -->
-<!-- Add screenshot of Preview page (Studio + thumbnails) here -->
 
 ## Tech Stack
 

@@ -1407,9 +1407,12 @@ struct ContentView: View {
             let imgs = thumbnails.map { name in
                 let relativePath = "snapshots/\(name)"
                 return """
-                <div class="thumb" onclick="this.classList.toggle('selected')">
-                    <img src="\(relativePath)" alt="\(name)" />
-                    <span>\(name.replacingOccurrences(of: ".png", with: ""))</span>
+                <div class="thumb">
+                    <img src="\(relativePath)" alt="\(name)" onclick="this.parentElement.classList.toggle('selected')" />
+                    <div class="thumb-bar">
+                        <span>\(name.replacingOccurrences(of: ".png", with: ""))</span>
+                        <a class="dl-btn" href="\(relativePath)" download="\(name)" title="Download">&#x2B07;</a>
+                    </div>
                 </div>
                 """
             }.joined(separator: "\n")
@@ -1530,11 +1533,23 @@ struct ContentView: View {
                 .thumb img {
                     display: block; width: 100%; height: auto;
                 }
+                .thumb-bar {
+                    display: flex; align-items: center; justify-content: space-between;
+                    padding: 4px 8px;
+                }
                 .thumb span {
-                    display: block; padding: 5px 8px;
                     font-size: 10px; color: #8C8A82;
                     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
                 }
+                .dl-btn {
+                    font-size: 13px; color: #8C8A82; text-decoration: none;
+                    width: 22px; height: 22px; display: flex;
+                    align-items: center; justify-content: center;
+                    border-radius: 4px; background: #252420;
+                    border: 1px solid #33312C; flex-shrink: 0;
+                    transition: all 0.15s ease;
+                }
+                .dl-btn:hover { border-color: #D9BF94; color: #EDE8DE; }
                 /* Path bar */
                 .pathbar {
                     height: 28px; min-height: 28px;
