@@ -986,26 +986,22 @@ struct ContentView: View {
         let thumbnailHTML: String
         if thumbnails.isEmpty {
             thumbnailHTML = """
-            <div style="text-align:center;padding:40px 0;color:#8C8A82;">
-                <p style="font-size:15px;">No thumbnails yet. Run generation first to capture frames.</p>
+            <div style="text-align:center;padding:24px 0;color:#8C8A82;">
+                <p style="font-size:13px;">No thumbnails yet. Generating after preview starts...</p>
             </div>
             """
         } else {
             let imgs = thumbnails.map { name in
                 let relativePath = "snapshots/\(name)"
                 return """
-                <div style="flex:0 0 auto;border-radius:8px;overflow:hidden;border:1px solid #33312C;background:#1F1E1A;transition:transform 0.2s ease;">
-                    <img src="\(relativePath)" style="display:block;width:320px;height:auto;" alt="\(name)" />
-                    <div style="padding:6px 10px;font-size:11px;color:#8C8A82;font-family:-apple-system,sans-serif;">\(name)</div>
+                <div class="thumb" onclick="this.classList.toggle('selected')">
+                    <img src="\(relativePath)" alt="\(name)" />
+                    <span>\(name.replacingOccurrences(of: ".png", with: ""))</span>
                 </div>
                 """
             }.joined(separator: "\n")
 
-            thumbnailHTML = """
-            <div style="display:flex;gap:12px;overflow-x:auto;padding:4px 0 12px 0;">
-                \(imgs)
-            </div>
-            """
+            thumbnailHTML = imgs
         }
 
         let html = """
@@ -1021,110 +1017,177 @@ struct ContentView: View {
                     background: #141412;
                     color: #EDE8DE;
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                    min-height: 100vh;
+                    height: 100vh;
+                    overflow: hidden;
                     display: flex;
                     flex-direction: column;
-                    align-items: center;
                 }
-                .container {
-                    max-width: 820px;
-                    width: 100%;
-                    padding: 48px 32px;
+                /* Top bar */
+                .topbar {
+                    height: 48px; min-height: 48px;
+                    background: #1A1918;
+                    border-bottom: 1px solid #2A2824;
+                    display: flex; align-items: center;
+                    padding: 0 20px; gap: 12px;
                 }
-                .header {
-                    display: flex;
-                    align-items: center;
-                    gap: 14px;
-                    margin-bottom: 32px;
-                }
-                .header-icon {
-                    width: 40px; height: 40px;
+                .topbar-icon {
+                    width: 28px; height: 28px;
                     background: linear-gradient(135deg, #D9BF94, #C7804E);
-                    border-radius: 10px;
+                    border-radius: 6px;
                     display: flex; align-items: center; justify-content: center;
                 }
-                .header-icon svg { width: 20px; height: 20px; fill: #141412; }
-                .header h1 {
-                    font-size: 22px; font-weight: 700; letter-spacing: -0.3px;
+                .topbar-icon svg { width: 14px; height: 14px; fill: #141412; }
+                .topbar h1 { font-size: 14px; font-weight: 600; }
+                .topbar .sep { color: #33312C; font-weight: 300; }
+                .topbar .project-name { color: #D9BF94; font-size: 13px; font-weight: 500; }
+                .topbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+                .topbar-btn {
+                    font-size: 11px; font-weight: 600; padding: 6px 14px;
+                    border-radius: 6px; border: none; cursor: pointer;
+                    text-decoration: none; display: inline-flex; align-items: center; gap: 5px;
+                    transition: all 0.15s ease;
                 }
-                .header p {
-                    font-size: 12px; color: #8C8A82; text-transform: uppercase;
-                    letter-spacing: 1.5px; font-weight: 500;
+                .btn-primary {
+                    background: linear-gradient(90deg, #D9BF94, #C7804E);
+                    color: #141412;
                 }
-                .section-label {
+                .btn-primary:hover { opacity: 0.9; }
+                .btn-secondary {
+                    background: #252420; color: #8C8A82;
+                    border: 1px solid #33312C;
+                }
+                .btn-secondary:hover { border-color: #D9BF94; color: #EDE8DE; }
+                /* Main layout */
+                .main {
+                    flex: 1; display: flex; overflow: hidden;
+                }
+                /* Studio iframe */
+                .studio-pane {
+                    flex: 1; position: relative;
+                    border-right: 1px solid #2A2824;
+                }
+                .studio-pane iframe {
+                    width: 100%; height: 100%; border: none;
+                }
+                .studio-loading {
+                    position: absolute; inset: 0;
+                    display: flex; flex-direction: column;
+                    align-items: center; justify-content: center;
+                    background: #141412; gap: 12px;
+                    transition: opacity 0.4s ease;
+                }
+                .studio-loading.hidden { opacity: 0; pointer-events: none; }
+                .dots { display: flex; gap: 6px; }
+                .dots span {
+                    width: 8px; height: 8px; border-radius: 50%;
+                    background: #D9BF94;
+                    animation: pulse 1s ease-in-out infinite;
+                }
+                .dots span:nth-child(2) { animation-delay: 0.15s; }
+                .dots span:nth-child(3) { animation-delay: 0.3s; }
+                @keyframes pulse {
+                    0%, 100% { opacity: 0.3; transform: scale(0.8); }
+                    50% { opacity: 1; transform: scale(1); }
+                }
+                /* Sidebar */
+                .sidebar {
+                    width: 220px; min-width: 220px;
+                    background: #1A1918;
+                    display: flex; flex-direction: column;
+                    overflow: hidden;
+                }
+                .sidebar-header {
+                    padding: 14px 16px 10px;
                     font-size: 10px; font-weight: 700; color: #8C8A82;
                     text-transform: uppercase; letter-spacing: 1.5px;
-                    margin-bottom: 12px;
+                    border-bottom: 1px solid #2A2824;
                 }
-                .card {
+                .sidebar-scroll {
+                    flex: 1; overflow-y: auto; padding: 8px;
+                    display: flex; flex-direction: column; gap: 6px;
+                }
+                .thumb {
+                    border-radius: 6px; overflow: hidden;
+                    border: 1px solid #2A2824; cursor: pointer;
+                    transition: border-color 0.15s ease;
                     background: #1F1E1A;
-                    border: 1px solid #33312C;
-                    border-radius: 12px;
-                    padding: 20px;
-                    margin-bottom: 24px;
                 }
-                .studio-btn {
-                    display: inline-flex; align-items: center; gap: 8px;
-                    background: linear-gradient(90deg, #D9BF94, #C7804E);
-                    color: #141412; font-weight: 600; font-size: 14px;
-                    padding: 12px 28px; border-radius: 10px; border: none;
-                    cursor: pointer; text-decoration: none;
-                    transition: opacity 0.2s ease;
+                .thumb:hover { border-color: #D9BF94; }
+                .thumb.selected { border-color: #C7804E; border-width: 2px; }
+                .thumb img {
+                    display: block; width: 100%; height: auto;
                 }
-                .studio-btn:hover { opacity: 0.9; }
-                .studio-btn svg { width: 16px; height: 16px; fill: #141412; }
-                .folder-btn {
-                    display: inline-flex; align-items: center; gap: 6px;
-                    background: #1F1E1A; color: #8C8A82; font-size: 13px;
-                    padding: 10px 18px; border-radius: 8px;
-                    border: 1px solid #33312C; cursor: pointer; text-decoration: none;
-                    margin-left: 10px; transition: border-color 0.2s ease;
+                .thumb span {
+                    display: block; padding: 5px 8px;
+                    font-size: 10px; color: #8C8A82;
+                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
                 }
-                .folder-btn:hover { border-color: #D9BF94; color: #EDE8DE; }
-                .meta { font-size: 12px; color: #8C8A82; margin-top: 16px; }
-                .meta span { color: #D9BF94; }
+                /* Path bar */
+                .pathbar {
+                    height: 28px; min-height: 28px;
+                    background: #1A1918;
+                    border-top: 1px solid #2A2824;
+                    display: flex; align-items: center;
+                    padding: 0 16px;
+                    font-size: 11px; color: #5A5850;
+                }
+                .pathbar span { color: #8C8A82; }
+                /* Animations */
                 .fade-in { animation: fadeIn 0.4s ease forwards; opacity: 0; }
                 @keyframes fadeIn { to { opacity: 1; } }
-                .fade-in:nth-child(2) { animation-delay: 0.05s; }
-                .fade-in:nth-child(3) { animation-delay: 0.1s; }
-                .fade-in:nth-child(4) { animation-delay: 0.15s; }
             </style>
         </head>
         <body>
-            <div class="container">
-                <div class="header fade-in">
-                    <div class="header-icon">
-                        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                    </div>
-                    <div>
-                        <h1>\(projectName)</h1>
-                        <p>VideoHub HQ</p>
-                    </div>
+            <div class="topbar fade-in">
+                <div class="topbar-icon">
+                    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 </div>
-
-                <div class="fade-in">
-                    <div class="section-label">Key Frames</div>
-                    <div class="card">
+                <h1>VideoHub HQ</h1>
+                <span class="sep">/</span>
+                <span class="project-name">\(projectName)</span>
+                <div class="topbar-right">
+                    <a class="topbar-btn btn-secondary" href="http://localhost:3002" target="_blank">
+                        Open Studio Fullscreen
+                    </a>
+                </div>
+            </div>
+            <div class="main">
+                <div class="studio-pane">
+                    <div class="studio-loading" id="studioLoader">
+                        <div class="dots"><span></span><span></span><span></span></div>
+                        <div style="font-size:13px;color:#8C8A82;">Connecting to HyperFrames Studio...</div>
+                    </div>
+                    <iframe id="studioFrame" src="about:blank"></iframe>
+                </div>
+                <div class="sidebar">
+                    <div class="sidebar-header">Key Frames</div>
+                    <div class="sidebar-scroll">
                         \(thumbnailHTML)
                     </div>
                 </div>
-
-                <div class="fade-in">
-                    <div class="section-label">Actions</div>
-                    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
-                        <a class="studio-btn" href="http://localhost:3002" target="_blank">
-                            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                            Open HyperFrames Studio
-                        </a>
-                        <span class="folder-btn" onclick="window.location='file://\(projectPath)'">
-                            Open Folder
-                        </span>
-                    </div>
-                    <div class="meta">
-                        Project path: <span>\(projectPath)</span>
-                    </div>
-                </div>
             </div>
+            <div class="pathbar fade-in">
+                <span>\(projectPath)</span>
+            </div>
+            <script>
+                const iframe = document.getElementById('studioFrame');
+                const loader = document.getElementById('studioLoader');
+                const studioUrl = 'http://localhost:3002';
+                let attempts = 0;
+                function tryConnect() {
+                    fetch(studioUrl, { mode: 'no-cors' })
+                        .then(() => {
+                            iframe.src = studioUrl;
+                            iframe.onload = () => loader.classList.add('hidden');
+                        })
+                        .catch(() => {
+                            attempts++;
+                            if (attempts < 30) setTimeout(tryConnect, 1000);
+                            else loader.innerHTML = '<div style="color:#8C8A82;font-size:13px;">Studio not responding. <a href="' + studioUrl + '" target="_blank" style="color:#D9BF94;">Open directly</a></div>';
+                        });
+                }
+                tryConnect();
+            </script>
         </body>
         </html>
         """
